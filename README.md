@@ -1,0 +1,2 @@
+# kanso-rs
+Objectstore stack
