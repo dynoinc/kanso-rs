@@ -1,0 +1,10 @@
+[package]
+name = "kanso-inmemory"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kanso-client = { workspace = true }
+bytes = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
