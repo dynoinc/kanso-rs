@@ -94,12 +94,14 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
             Some(resp) => {
                 // Path exists - check if lease is alive
                 let expiry = get_expiry(&resp.metadata)?;
+                let current_owner = get_owner(&resp.metadata)?;
 
-                if is_lease_alive(expiry) {
+                // If lease is alive and we don't own it, fail
+                if is_lease_alive(expiry) && current_owner != self.owner {
                     return Err(LeaseError::LeaseHeld);
                 }
 
-                // Lease is expired - take it over
+                // Either lease is expired or we own it - take it over/renew
                 let value: T = serde_json::from_slice(&resp.value)?;
                 let expiry = current_timestamp() + self.ttl.as_secs();
                 let mut metadata = Metadata::new();
@@ -171,28 +173,23 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
     /// Renew the lease without changing the value
     ///
     /// This extends the lease expiry time without modifying the stored value.
-    /// Note: This currently fetches the full value. Could be optimized with HEAD request.
+    /// Note: Fetches the value to write it back with updated metadata.
     pub async fn renew(&mut self) -> Result<(), LeaseError> {
-        // Get current value and metadata
+        // Get current value (we need it to write back)
         let resp = GetRequest::new(&self.path)
             .execute(&self.client)
             .await?
             .ok_or(LeaseError::NotFound)?;
 
-        // Verify we still own the lease
-        let current_owner = get_owner(&resp.metadata)?;
-        if current_owner != self.owner {
-            return Err(LeaseError::Conflict);
-        }
-
-        // Update expiry
+        // Update expiry with our tracked version
+        // If version doesn't match, someone else modified it (Conflict)
         let expiry = current_timestamp() + self.ttl.as_secs();
         let mut metadata = Metadata::new();
         metadata.insert(OWNER_HEADER, &self.owner);
         metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
         let response = PutRequest::new(&self.path, resp.value)
-            .if_version_matches(resp.version)
+            .if_version_matches(self.version.clone())
             .metadata(metadata)
             .execute(&self.client)
             .await
@@ -288,20 +285,30 @@ mod tests {
         // Test renew
         lease.renew().await.unwrap();
 
-        // Test release
-        lease.release().await.unwrap();
-
-        // Test acquire of expired lease (takeover)
-        let (_lease2, value2) = AcquireRequest::new("test-key", TestData { count: 999 })
-            .execute(&store)
-            .await
-            .unwrap();
-        assert_eq!(value2.count, 1); // Should get the updated value
-
-        // Test that we can't acquire while lease is held
+        // Test that we can't acquire while lease is held by another owner
         let result = AcquireRequest::new("test-key", TestData { count: 999 })
+            .owner("different-owner")
             .execute(&store)
             .await;
         assert!(matches!(result, Err(LeaseError::LeaseHeld)));
+
+        // Test that we CAN re-acquire if we own the lease
+        let (_lease2, value2) = AcquireRequest::new("test-key", TestData { count: 888 })
+            .owner("test-owner")
+            .execute(&store)
+            .await
+            .unwrap();
+        assert_eq!(value2.count, 1); // Should get existing value, not init value
+
+        // Test release
+        _lease2.release().await.unwrap();
+
+        // Test acquire of expired lease (takeover)
+        let (_lease3, value3) = AcquireRequest::new("test-key", TestData { count: 999 })
+            .owner("new-owner")
+            .execute(&store)
+            .await
+            .unwrap();
+        assert_eq!(value3.count, 1); // Should get the existing value
     }
 }
