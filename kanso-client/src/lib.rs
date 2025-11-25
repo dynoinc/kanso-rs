@@ -52,6 +52,95 @@ impl std::fmt::Display for Version {
     }
 }
 
+/// Error type for path validation
+#[derive(Debug, Error)]
+pub enum PathError {
+    #[error("path cannot have leading or trailing slashes")]
+    LeadingTrailingSlash,
+
+    #[error("path cannot contain empty segments")]
+    EmptySegment,
+
+    #[error("path cannot contain relative segments (. or ..)")]
+    RelativeSegment,
+
+    #[error("path cannot contain ASCII control characters")]
+    ControlCharacter,
+
+    #[error("path cannot be empty")]
+    Empty,
+}
+
+/// Represents a validated path in the object store
+///
+/// A Path maintains the following invariants:
+/// - Paths are delimited by `/`
+/// - Paths do not contain leading or trailing `/`
+/// - Paths do not contain relative path segments (`.` or `..`)
+/// - Paths do not contain empty path segments
+/// - Paths do not contain any ASCII control characters
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Path(String);
+
+impl Path {
+    /// Create a new path with validation
+    pub fn new(s: impl AsRef<str>) -> Result<Self, PathError> {
+        let s = s.as_ref();
+
+        // Empty check
+        if s.is_empty() {
+            return Err(PathError::Empty);
+        }
+
+        // Leading/trailing slash check
+        if s.starts_with('/') || s.ends_with('/') {
+            return Err(PathError::LeadingTrailingSlash);
+        }
+
+        // Validate each segment
+        for segment in s.split('/') {
+            if segment.is_empty() {
+                return Err(PathError::EmptySegment);
+            }
+            if segment == "." || segment == ".." {
+                return Err(PathError::RelativeSegment);
+            }
+            if segment.chars().any(|c| c.is_ascii_control()) {
+                return Err(PathError::ControlCharacter);
+            }
+        }
+
+        Ok(Self(s.to_string()))
+    }
+
+    /// Get the path as a string slice
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Path {
+    type Error = PathError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl TryFrom<&str> for Path {
+    type Error = PathError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
+
+impl std::fmt::Display for Path {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Metadata associated with an object (e.g., user-defined headers)
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Metadata {
@@ -114,13 +203,17 @@ pub enum Condition {
 /// Request for a get operation
 #[derive(Debug, Clone)]
 pub struct GetRequest {
-    pub key: String,
+    pub key: Path,
 }
 
 impl GetRequest {
     /// Create a new get request
-    pub fn new(key: impl Into<String>) -> Self {
-        Self { key: key.into() }
+    ///
+    /// Returns a PathError if the key doesn't satisfy Path invariants
+    pub fn new(key: impl AsRef<str>) -> Result<Self, PathError> {
+        Ok(Self {
+            key: Path::new(key)?,
+        })
     }
 
     /// Execute the get request against a client
@@ -143,7 +236,7 @@ pub struct GetResponse {
 /// Request for a put operation
 #[derive(Debug, Clone)]
 pub struct PutRequest {
-    pub key: String,
+    pub key: Path,
     pub value: Bytes,
     pub condition: Option<Condition>,
     pub metadata: Option<Metadata>,
@@ -151,13 +244,15 @@ pub struct PutRequest {
 
 impl PutRequest {
     /// Create a new put request
-    pub fn new(key: impl Into<String>, value: Bytes) -> Self {
-        Self {
-            key: key.into(),
+    ///
+    /// Returns a PathError if the key doesn't satisfy Path invariants
+    pub fn new(key: impl AsRef<str>, value: Bytes) -> Result<Self, PathError> {
+        Ok(Self {
+            key: Path::new(key)?,
             value,
             condition: None,
             metadata: None,
-        }
+        })
     }
 
     /// Set the condition to only write if the key does not exist
@@ -194,19 +289,21 @@ pub struct PutResponse {
 /// Request for a copy operation (copy object to itself with updated metadata)
 #[derive(Debug, Clone)]
 pub struct CopyRequest {
-    pub key: String,
+    pub key: Path,
     pub metadata: Metadata,
     pub condition: Option<Condition>,
 }
 
 impl CopyRequest {
     /// Create a new copy request
-    pub fn new(key: impl Into<String>, metadata: Metadata) -> Self {
-        Self {
-            key: key.into(),
+    ///
+    /// Returns a PathError if the key doesn't satisfy Path invariants
+    pub fn new(key: impl AsRef<str>, metadata: Metadata) -> Result<Self, PathError> {
+        Ok(Self {
+            key: Path::new(key)?,
             metadata,
             condition: None,
-        }
+        })
     }
 
     /// Set the condition to only copy if the current version matches

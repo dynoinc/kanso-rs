@@ -2,8 +2,9 @@ use std::marker::PhantomData;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use kanso_client::{Client, CopyRequest, GetRequest, Metadata, PutRequest, Version};
-use serde::{Serialize, de::DeserializeOwned};
+use kanso_client::{Client, CopyRequest, GetRequest, Metadata, PathError, PutRequest, Version};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -34,6 +35,9 @@ pub enum LeaseError {
 
     #[error("invalid metadata: {0}")]
     InvalidMetadata(String),
+
+    #[error("invalid path: {0}")]
+    InvalidPath(#[from] PathError),
 }
 
 /// Builder for acquiring a lease
@@ -76,7 +80,7 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
     /// Returns an error if the lease is currently held by another owner
     pub async fn execute(self, client: &Client) -> Result<(Lease<T>, T), LeaseError> {
         // Get first (much cheaper than Put)
-        let existing = GetRequest::new(&self.path).execute(client).await?;
+        let existing = GetRequest::new(&self.path)?.execute(client).await?;
 
         let (value, version) = match existing {
             None => {
@@ -87,7 +91,7 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
                 metadata.insert(OWNER_HEADER, &self.owner);
                 metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
-                let response = PutRequest::new(&self.path, Bytes::from(value_bytes))
+                let response = PutRequest::new(&self.path, Bytes::from(value_bytes))?
                     .if_absent()
                     .metadata(metadata)
                     .execute(client)
@@ -116,7 +120,7 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
                 metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
                 let expected_version = resp.version.clone();
-                let response = CopyRequest::new(&self.path, metadata)
+                let response = CopyRequest::new(&self.path, metadata)?
                     .if_version_matches(resp.version)
                     .execute(client)
                     .await
@@ -169,7 +173,7 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
         metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
         let expected = self.version.clone();
-        let response = PutRequest::new(&self.path, Bytes::from(value_bytes))
+        let response = PutRequest::new(&self.path, Bytes::from(value_bytes))?
             .if_version_matches(expected.clone())
             .metadata(metadata)
             .execute(&self.client)
@@ -196,7 +200,7 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
         metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
         let expected = self.version.clone();
-        let response = CopyRequest::new(&self.path, metadata)
+        let response = CopyRequest::new(&self.path, metadata)?
             .if_version_matches(expected.clone())
             .execute(&self.client)
             .await
@@ -220,7 +224,7 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
         metadata.insert(EXPIRY_HEADER, "0");
 
         let expected = self.version.clone();
-        CopyRequest::new(&self.path, metadata)
+        CopyRequest::new(&self.path, metadata)?
             .if_version_matches(self.version)
             .execute(&self.client)
             .await
@@ -297,10 +301,7 @@ mod tests {
             .owner("different-owner")
             .execute(&store)
             .await;
-        assert!(matches!(
-            result,
-            Err(LeaseError::LeaseHeld { .. })
-        ));
+        assert!(matches!(result, Err(LeaseError::LeaseHeld { .. })));
 
         // Test that we CAN re-acquire if we own the lease
         let (_lease2, value2) = AcquireRequest::new("test-key", TestData { count: 888 })

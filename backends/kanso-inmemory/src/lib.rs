@@ -49,7 +49,7 @@ impl Default for InMemoryStore {
 impl ObjectStore for InMemoryStore {
     async fn get(&self, request: GetRequest) -> Result<Option<GetResponse>, kanso_client::Error> {
         let data = self.data.read().await;
-        Ok(data.get(&request.key).map(|obj| GetResponse {
+        Ok(data.get(request.key.as_str()).map(|obj| GetResponse {
             value: obj.value.clone(),
             version: obj.version.clone(),
             metadata: obj.metadata.clone(),
@@ -63,14 +63,14 @@ impl ObjectStore for InMemoryStore {
         if let Some(condition) = &request.condition {
             match condition {
                 Condition::IfAbsent => {
-                    if data.contains_key(&request.key) {
+                    if data.contains_key(request.key.as_str()) {
                         return Err(kanso_client::Error::ConditionFailed {
                             condition: condition.clone(),
                         });
                     }
                 }
                 Condition::IfVersionMatches(expected_version) => {
-                    match data.get(&request.key) {
+                    match data.get(request.key.as_str()) {
                         Some(obj) if &obj.version == expected_version => {
                             // Version matches, continue
                         }
@@ -89,7 +89,7 @@ impl ObjectStore for InMemoryStore {
         let metadata = request.metadata.unwrap_or_default();
 
         data.insert(
-            request.key,
+            request.key.as_str().to_string(),
             StoredObject {
                 value: request.value,
                 version: version.clone(),
@@ -105,7 +105,7 @@ impl ObjectStore for InMemoryStore {
 
         // Get the existing object and clone the value we need
         let value = data
-            .get(&request.key)
+            .get(request.key.as_str())
             .map(|obj| obj.value.clone())
             .ok_or(kanso_client::Error::NotFound)?;
 
@@ -119,7 +119,7 @@ impl ObjectStore for InMemoryStore {
                     });
                 }
                 Condition::IfVersionMatches(expected_version) => {
-                    let obj = data.get(&request.key).unwrap(); // Safe: we just checked it exists
+                    let obj = data.get(request.key.as_str()).unwrap(); // Safe: we just checked it exists
                     if &obj.version != expected_version {
                         return Err(kanso_client::Error::ConditionFailed {
                             condition: condition.clone(),
@@ -132,7 +132,7 @@ impl ObjectStore for InMemoryStore {
         // Create new version and update metadata, keep the value
         let version = self.next_version().await;
         data.insert(
-            request.key,
+            request.key.as_str().to_string(),
             StoredObject {
                 value,
                 version: version.clone(),
