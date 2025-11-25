@@ -1,0 +1,13 @@
+[package]
+name = "kanso-lease"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kanso-client = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
