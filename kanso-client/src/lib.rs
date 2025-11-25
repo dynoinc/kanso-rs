@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -38,6 +39,36 @@ impl From<&str> for Version {
     }
 }
 
+/// Metadata associated with an object (e.g., user-defined headers)
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Metadata {
+    pub headers: HashMap<String, String>,
+}
+
+impl Metadata {
+    /// Create empty metadata
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create metadata with a single key-value pair
+    pub fn with(key: impl Into<String>, value: impl Into<String>) -> Self {
+        let mut headers = HashMap::new();
+        headers.insert(key.into(), value.into());
+        Self { headers }
+    }
+
+    /// Insert a key-value pair
+    pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.headers.insert(key.into(), value.into());
+    }
+
+    /// Get a value by key
+    pub fn get(&self, key: &str) -> Option<&String> {
+        self.headers.get(key)
+    }
+}
+
 /// Condition for conditional writes
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Condition {
@@ -72,6 +103,8 @@ pub struct GetResponse {
     pub value: Bytes,
     /// The version of the object
     pub version: Version,
+    /// Metadata associated with the object
+    pub metadata: Metadata,
 }
 
 /// Request for a put operation
@@ -80,6 +113,7 @@ pub struct PutRequest {
     pub key: String,
     pub value: Bytes,
     pub condition: Option<Condition>,
+    pub metadata: Option<Metadata>,
 }
 
 impl PutRequest {
@@ -89,6 +123,7 @@ impl PutRequest {
             key: key.into(),
             value,
             condition: None,
+            metadata: None,
         }
     }
 
@@ -101,6 +136,12 @@ impl PutRequest {
     /// Set the condition to only write if the current version matches
     pub fn if_version_matches(mut self, version: Version) -> Self {
         self.condition = Some(Condition::IfVersionMatches(version));
+        self
+    }
+
+    /// Set metadata for the object
+    pub fn metadata(mut self, metadata: Metadata) -> Self {
+        self.metadata = Some(metadata);
         self
     }
 

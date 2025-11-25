@@ -41,3 +41,4 @@ Design decisions and guidelines for the Kanso project.
 - Must pass `cargo check`
 - Must pass `cargo clippy` with `-D warnings`
 - Must be formatted with `cargo fmt`
+- Keep all dependencies at workspace level in root `Cargo.toml`
