@@ -165,6 +165,43 @@ pub struct PutResponse {
     pub version: Version,
 }
 
+/// Request for a copy operation (copy object to itself with updated metadata)
+#[derive(Debug, Clone)]
+pub struct CopyRequest {
+    pub key: String,
+    pub metadata: Metadata,
+    pub condition: Option<Condition>,
+}
+
+impl CopyRequest {
+    /// Create a new copy request
+    pub fn new(key: impl Into<String>, metadata: Metadata) -> Self {
+        Self {
+            key: key.into(),
+            metadata,
+            condition: None,
+        }
+    }
+
+    /// Set the condition to only copy if the current version matches
+    pub fn if_version_matches(mut self, version: Version) -> Self {
+        self.condition = Some(Condition::IfVersionMatches(version));
+        self
+    }
+
+    /// Execute the copy request against a client
+    pub async fn execute(self, client: &Client) -> Result<CopyResponse, Error> {
+        client.copy(self).await
+    }
+}
+
+/// Response from a copy operation
+#[derive(Debug, Clone)]
+pub struct CopyResponse {
+    /// The new version of the copied object
+    pub version: Version,
+}
+
 /// Trait representing an object store client
 #[async_trait]
 pub trait ObjectStore: Send + Sync {
@@ -175,6 +212,9 @@ pub trait ObjectStore: Send + Sync {
 
     /// Execute a put operation
     async fn put(&self, request: PutRequest) -> Result<PutResponse, Error>;
+
+    /// Execute a copy operation (copy object to itself with updated metadata)
+    async fn copy(&self, request: CopyRequest) -> Result<CopyResponse, Error>;
 }
 
 /// Type alias for the object store client

@@ -4,7 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use kanso_client::{
-    Condition, GetRequest, GetResponse, Metadata, ObjectStore, PutRequest, PutResponse, Version,
+    Condition, CopyRequest, CopyResponse, GetRequest, GetResponse, Metadata, ObjectStore,
+    PutRequest, PutResponse, Version,
 };
 use tokio::sync::RwLock;
 
@@ -93,5 +94,44 @@ impl ObjectStore for InMemoryStore {
         );
 
         Ok(PutResponse { version })
+    }
+
+    async fn copy(&self, request: CopyRequest) -> Result<CopyResponse, kanso_client::Error> {
+        let mut data = self.data.write().await;
+
+        // Get the existing object and clone the value we need
+        let value = data
+            .get(&request.key)
+            .map(|obj| obj.value.clone())
+            .ok_or(kanso_client::Error::NotFound)?;
+
+        // Check condition if present
+        if let Some(condition) = &request.condition {
+            match condition {
+                Condition::IfAbsent => {
+                    // This doesn't make sense for copy, but handle it
+                    return Err(kanso_client::Error::ConditionFailed);
+                }
+                Condition::IfVersionMatches(expected_version) => {
+                    let obj = data.get(&request.key).unwrap(); // Safe: we just checked it exists
+                    if &obj.version != expected_version {
+                        return Err(kanso_client::Error::ConditionFailed);
+                    }
+                }
+            }
+        }
+
+        // Create new version and update metadata, keep the value
+        let version = self.next_version().await;
+        data.insert(
+            request.key,
+            StoredObject {
+                value,
+                version: version.clone(),
+                metadata: request.metadata,
+            },
+        );
+
+        Ok(CopyResponse { version })
     }
 }

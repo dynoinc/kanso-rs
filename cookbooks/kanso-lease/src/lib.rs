@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use kanso_client::{Client, GetRequest, Metadata, PutRequest, Version};
+use kanso_client::{Client, CopyRequest, GetRequest, Metadata, PutRequest, Version};
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use uuid::Uuid;
@@ -101,17 +101,15 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
                     return Err(LeaseError::LeaseHeld);
                 }
 
-                // Either lease is expired or we own it - take it over/renew
+                // Either lease is expired or we own it - take it over/renew using copy
                 let value: T = serde_json::from_slice(&resp.value)?;
                 let expiry = current_timestamp() + self.ttl.as_secs();
                 let mut metadata = Metadata::new();
                 metadata.insert(OWNER_HEADER, &self.owner);
                 metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
-                let value_bytes = resp.value;
-                let response = PutRequest::new(&self.path, value_bytes)
-                    .if_version_matches(resp.version.clone())
-                    .metadata(metadata)
+                let response = CopyRequest::new(&self.path, metadata)
+                    .if_version_matches(resp.version)
                     .execute(client)
                     .await
                     .map_err(|_| LeaseError::Conflict)?;
@@ -173,24 +171,17 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
     /// Renew the lease without changing the value
     ///
     /// This extends the lease expiry time without modifying the stored value.
-    /// Note: Fetches the value to write it back with updated metadata.
+    /// Uses copy operation to update metadata without fetching the value.
     pub async fn renew(&mut self) -> Result<(), LeaseError> {
-        // Get current value (we need it to write back)
-        let resp = GetRequest::new(&self.path)
-            .execute(&self.client)
-            .await?
-            .ok_or(LeaseError::NotFound)?;
-
-        // Update expiry with our tracked version
+        // Update expiry with our tracked version using copy
         // If version doesn't match, someone else modified it (Conflict)
         let expiry = current_timestamp() + self.ttl.as_secs();
         let mut metadata = Metadata::new();
         metadata.insert(OWNER_HEADER, &self.owner);
         metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
-        let response = PutRequest::new(&self.path, resp.value)
+        let response = CopyRequest::new(&self.path, metadata)
             .if_version_matches(self.version.clone())
-            .metadata(metadata)
             .execute(&self.client)
             .await
             .map_err(|_| LeaseError::Conflict)?;
