@@ -71,32 +71,28 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
     ///
     /// Returns an error if the lease is currently held by another owner
     pub async fn execute(self, client: &Client) -> Result<(Lease<T>, T), LeaseError> {
-        // Try to create new lease optimistically
-        let value_bytes = serde_json::to_vec(&self.init_value)?;
-        let expiry = current_timestamp() + self.ttl.as_secs();
-        let mut metadata = Metadata::new();
-        metadata.insert(OWNER_HEADER, &self.owner);
-        metadata.insert(EXPIRY_HEADER, expiry.to_string());
+        // Get first (much cheaper than Put)
+        let existing = GetRequest::new(&self.path).execute(client).await?;
 
-        let put_result = PutRequest::new(&self.path, Bytes::from(value_bytes))
-            .if_absent()
-            .metadata(metadata.clone())
-            .execute(client)
-            .await;
+        let (value, version) = match existing {
+            None => {
+                // Path doesn't exist - create with init_value
+                let value_bytes = serde_json::to_vec(&self.init_value)?;
+                let expiry = current_timestamp() + self.ttl.as_secs();
+                let mut metadata = Metadata::new();
+                metadata.insert(OWNER_HEADER, &self.owner);
+                metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
-        let (value, version) = match put_result {
-            Ok(response) => {
-                // Successfully created new lease
+                let response = PutRequest::new(&self.path, Bytes::from(value_bytes))
+                    .if_absent()
+                    .metadata(metadata)
+                    .execute(client)
+                    .await?;
+
                 (self.init_value, response.version)
             }
-            Err(_) => {
-                // Object already exists - get it and check if we can take over
-                let resp = GetRequest::new(&self.path)
-                    .execute(client)
-                    .await?
-                    .ok_or(LeaseError::NotFound)?;
-
-                // Check if lease is alive
+            Some(resp) => {
+                // Path exists - check if we can take over
                 let expiry_time = get_expiry(&resp.metadata)?;
                 let current_owner = get_owner(&resp.metadata)?;
 
@@ -105,8 +101,12 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
                     return Err(LeaseError::LeaseHeld);
                 }
 
-                // Either lease is expired or we own it - take it over/renew using copy
+                // Either lease is expired or we own it - renew using copy
                 let value: T = serde_json::from_slice(&resp.value)?;
+                let expiry = current_timestamp() + self.ttl.as_secs();
+                let mut metadata = Metadata::new();
+                metadata.insert(OWNER_HEADER, &self.owner);
+                metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
                 let response = CopyRequest::new(&self.path, metadata)
                     .if_version_matches(resp.version)
