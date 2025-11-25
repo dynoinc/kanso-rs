@@ -47,18 +47,56 @@ pub enum Condition {
     IfVersionMatches(Version),
 }
 
+/// Request builder for get operations
+pub struct GetRequest {
+    store: Client,
+    key: String,
+}
+
+impl GetRequest {
+    /// Execute the get request
+    pub async fn execute(self) -> Result<Option<Bytes>, Error> {
+        self.store.execute_get(self.key).await
+    }
+}
+
+/// Request builder for put operations
+pub struct PutRequest {
+    store: Client,
+    key: String,
+    value: Bytes,
+    condition: Option<Condition>,
+}
+
+impl PutRequest {
+    /// Set the condition to only write if the key does not exist
+    pub fn if_absent(mut self) -> Self {
+        self.condition = Some(Condition::IfAbsent);
+        self
+    }
+
+    /// Set the condition to only write if the current version matches
+    pub fn if_version_matches(mut self, version: Version) -> Self {
+        self.condition = Some(Condition::IfVersionMatches(version));
+        self
+    }
+
+    /// Execute the put request
+    pub async fn execute(self) -> Result<Version, Error> {
+        self.store
+            .execute_put(self.key, self.value, self.condition)
+            .await
+    }
+}
+
 /// Trait representing an object store client
 #[async_trait]
 pub trait ObjectStore: Send + Sync {
-    /// Get the value associated with a key
-    ///
-    /// Returns `Ok(None)` if the key does not exist
-    async fn get(&self, key: String) -> Result<Option<Bytes>, Error>;
+    /// Execute a get operation
+    async fn execute_get(&self, key: String) -> Result<Option<Bytes>, Error>;
 
-    /// Put a value associated with a key, optionally with a condition
-    ///
-    /// Returns the new version of the stored object
-    async fn put(
+    /// Execute a put operation
+    async fn execute_put(
         &self,
         key: String,
         value: Bytes,
@@ -70,3 +108,30 @@ pub trait ObjectStore: Send + Sync {
 ///
 /// Users should use this type to interact with the object store
 pub type Client = Arc<dyn ObjectStore>;
+
+/// Extension trait providing builder methods for the object store client
+pub trait ObjectStoreExt {
+    /// Create a get request for the specified key
+    fn get(&self, key: impl Into<String>) -> GetRequest;
+
+    /// Create a put request for the specified key and value
+    fn put(&self, key: impl Into<String>, value: Bytes) -> PutRequest;
+}
+
+impl ObjectStoreExt for Client {
+    fn get(&self, key: impl Into<String>) -> GetRequest {
+        GetRequest {
+            store: self.clone(),
+            key: key.into(),
+        }
+    }
+
+    fn put(&self, key: impl Into<String>, value: Bytes) -> PutRequest {
+        PutRequest {
+            store: self.clone(),
+            key: key.into(),
+            value,
+            condition: None,
+        }
+    }
+}
