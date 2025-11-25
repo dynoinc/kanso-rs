@@ -47,28 +47,51 @@ pub enum Condition {
     IfVersionMatches(Version),
 }
 
-/// Request builder for get operations
+/// Request for a get operation
+#[derive(Debug, Clone)]
 pub struct GetRequest {
-    store: Client,
-    key: String,
+    pub key: String,
 }
 
 impl GetRequest {
-    /// Execute the get request
-    pub async fn execute(self) -> Result<Option<Bytes>, Error> {
-        self.store.execute_get(self.key).await
+    /// Create a new get request
+    pub fn new(key: impl Into<String>) -> Self {
+        Self { key: key.into() }
+    }
+
+    /// Execute the get request against a client
+    pub async fn execute(self, client: &Client) -> Result<Option<GetResponse>, Error> {
+        client.get(self).await
     }
 }
 
-/// Request builder for put operations
+/// Response from a get operation
+#[derive(Debug, Clone)]
+pub struct GetResponse {
+    /// The value associated with the key
+    pub value: Bytes,
+    /// The version of the object
+    pub version: Version,
+}
+
+/// Request for a put operation
+#[derive(Debug, Clone)]
 pub struct PutRequest {
-    store: Client,
-    key: String,
-    value: Bytes,
-    condition: Option<Condition>,
+    pub key: String,
+    pub value: Bytes,
+    pub condition: Option<Condition>,
 }
 
 impl PutRequest {
+    /// Create a new put request
+    pub fn new(key: impl Into<String>, value: Bytes) -> Self {
+        Self {
+            key: key.into(),
+            value,
+            condition: None,
+        }
+    }
+
     /// Set the condition to only write if the key does not exist
     pub fn if_absent(mut self) -> Self {
         self.condition = Some(Condition::IfAbsent);
@@ -81,57 +104,32 @@ impl PutRequest {
         self
     }
 
-    /// Execute the put request
-    pub async fn execute(self) -> Result<Version, Error> {
-        self.store
-            .execute_put(self.key, self.value, self.condition)
-            .await
+    /// Execute the put request against a client
+    pub async fn execute(self, client: &Client) -> Result<PutResponse, Error> {
+        client.put(self).await
     }
+}
+
+/// Response from a put operation
+#[derive(Debug, Clone)]
+pub struct PutResponse {
+    /// The new version of the stored object
+    pub version: Version,
 }
 
 /// Trait representing an object store client
 #[async_trait]
 pub trait ObjectStore: Send + Sync {
     /// Execute a get operation
-    async fn execute_get(&self, key: String) -> Result<Option<Bytes>, Error>;
+    ///
+    /// Returns `None` if the key does not exist
+    async fn get(&self, request: GetRequest) -> Result<Option<GetResponse>, Error>;
 
     /// Execute a put operation
-    async fn execute_put(
-        &self,
-        key: String,
-        value: Bytes,
-        condition: Option<Condition>,
-    ) -> Result<Version, Error>;
+    async fn put(&self, request: PutRequest) -> Result<PutResponse, Error>;
 }
 
 /// Type alias for the object store client
 ///
 /// Users should use this type to interact with the object store
 pub type Client = Arc<dyn ObjectStore>;
-
-/// Extension trait providing builder methods for the object store client
-pub trait ObjectStoreExt {
-    /// Create a get request for the specified key
-    fn get(&self, key: impl Into<String>) -> GetRequest;
-
-    /// Create a put request for the specified key and value
-    fn put(&self, key: impl Into<String>, value: Bytes) -> PutRequest;
-}
-
-impl ObjectStoreExt for Client {
-    fn get(&self, key: impl Into<String>) -> GetRequest {
-        GetRequest {
-            store: self.clone(),
-            key: key.into(),
-        }
-    }
-
-    fn put(&self, key: impl Into<String>, value: Bytes) -> PutRequest {
-        PutRequest {
-            store: self.clone(),
-            key: key.into(),
-            value,
-            condition: None,
-        }
-    }
-}
