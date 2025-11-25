@@ -1,0 +1,9 @@
+[package]
+name = "kanso-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }

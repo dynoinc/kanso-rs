@@ -1,0 +1,12 @@
+[workspace]
+members = ["kanso-client"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+bytes = "1.9"
+thiserror = "2.0"
+async-trait = "0.1"
