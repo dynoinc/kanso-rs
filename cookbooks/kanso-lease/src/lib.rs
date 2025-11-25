@@ -255,3 +255,53 @@ fn get_owner(metadata: &Metadata) -> Result<String, LeaseError> {
 fn is_lease_alive(expiry: u64) -> bool {
     expiry > current_timestamp()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kanso_inmemory::InMemoryStore;
+    use serde::{Deserialize, Serialize};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    struct TestData {
+        count: u32,
+    }
+
+    #[tokio::test]
+    async fn test_lease_happy_path() {
+        let store: Arc<dyn kanso_client::ObjectStore> = Arc::new(InMemoryStore::new());
+
+        // Test acquire with init value
+        let (mut lease, value) = AcquireRequest::new("test-key", TestData { count: 0 })
+            .owner("test-owner")
+            .ttl(Duration::from_secs(60))
+            .execute(&store)
+            .await
+            .unwrap();
+        assert_eq!(value.count, 0);
+
+        // Test update
+        lease.update(&TestData { count: 1 }).await.unwrap();
+
+        // Test renew
+        lease.renew().await.unwrap();
+
+        // Test release
+        lease.release().await.unwrap();
+
+        // Test acquire of expired lease (takeover)
+        let (_lease2, value2) = AcquireRequest::new("test-key", TestData { count: 999 })
+            .execute(&store)
+            .await
+            .unwrap();
+        assert_eq!(value2.count, 1); // Should get the updated value
+
+        // Test that we can't acquire while lease is held
+        let result = AcquireRequest::new("test-key", TestData { count: 999 })
+            .execute(&store)
+            .await;
+        assert!(matches!(result, Err(LeaseError::LeaseHeld)));
+    }
+}

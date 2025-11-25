@@ -8,7 +8,14 @@ use thiserror::Error;
 /// Error type for object store operations
 #[derive(Debug, Error)]
 pub enum Error {
-    // Empty for now - will be populated as implementations are added
+    #[error("condition failed")]
+    ConditionFailed,
+
+    #[error("not found")]
+    NotFound,
+
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Represents a version/etag for an object in the store

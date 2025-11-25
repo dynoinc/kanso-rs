@@ -42,3 +42,12 @@ Design decisions and guidelines for the Kanso project.
 - Must pass `cargo clippy` with `-D warnings`
 - Must be formatted with `cargo fmt`
 - Keep all dependencies at workspace level in root `Cargo.toml`
+- For local dependencies across crates, use relative paths
+
+## Testing
+
+- Don't add a lot of tests - usually 1 test covering all happy paths across all APIs
+- Consolidate multiple checks in a single test one after another
+- Don't go crazy with assertions - be pragmatic
+- Prioritize unit tests over integration tests
+- Use nextest to run tests
