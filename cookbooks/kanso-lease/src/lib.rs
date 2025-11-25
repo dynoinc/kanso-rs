@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use kanso_client::{Client, CopyRequest, GetRequest, Metadata, PathError, PutRequest, Version};
+use kanso_client::{Client, GetRequest, Metadata, PatchRequest, PathError, PutRequest, Version};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -112,7 +112,7 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
                     });
                 }
 
-                // Either lease is expired or we own it - renew using copy
+                // Either lease is expired or we own it - renew using patch
                 let value: T = serde_json::from_slice(&resp.value)?;
                 let expiry = current_timestamp() + self.ttl.as_secs();
                 let mut metadata = Metadata::new();
@@ -120,7 +120,7 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
                 metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
                 let expected_version = resp.version.clone();
-                let response = CopyRequest::new(&self.path, metadata)?
+                let response = PatchRequest::new(&self.path, metadata)?
                     .if_version_matches(resp.version)
                     .execute(client)
                     .await
@@ -190,9 +190,9 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
     /// Renew the lease without changing the value
     ///
     /// This extends the lease expiry time without modifying the stored value.
-    /// Uses copy operation to update metadata without fetching the value.
+    /// Uses patch operation to update metadata without fetching the value.
     pub async fn renew(&mut self) -> Result<(), LeaseError> {
-        // Update expiry with our tracked version using copy
+        // Update expiry with our tracked version using patch
         // If version doesn't match, someone else modified it (Conflict)
         let expiry = current_timestamp() + self.ttl.as_secs();
         let mut metadata = Metadata::new();
@@ -200,7 +200,7 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
         metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
         let expected = self.version.clone();
-        let response = CopyRequest::new(&self.path, metadata)?
+        let response = PatchRequest::new(&self.path, metadata)?
             .if_version_matches(expected.clone())
             .execute(&self.client)
             .await
@@ -218,13 +218,13 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
     /// This sets the expiry to a past time and clears the owner,
     /// making the lease available for others to acquire.
     pub async fn release(self) -> Result<(), LeaseError> {
-        // Set expiry to past and clear owner using copy (no need to fetch value)
+        // Set expiry to past and clear owner using patch (no need to fetch value)
         let mut metadata = Metadata::new();
         metadata.insert(OWNER_HEADER, "");
         metadata.insert(EXPIRY_HEADER, "0");
 
         let expected = self.version.clone();
-        CopyRequest::new(&self.path, metadata)?
+        PatchRequest::new(&self.path, metadata)?
             .if_version_matches(self.version)
             .execute(&self.client)
             .await

@@ -1,0 +1,8 @@
+[package]
+name = "kanso-backends-test-suite"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+kanso-client = { workspace = true }
+bytes = { workspace = true }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use kanso_client::{
-    Condition, CopyRequest, CopyResponse, GetRequest, GetResponse, Metadata, ObjectStore,
+    Condition, GetRequest, GetResponse, Metadata, ObjectStore, PatchRequest, PatchResponse,
     PutRequest, PutResponse, Version,
 };
 use tokio::sync::RwLock;
@@ -100,7 +100,7 @@ impl ObjectStore for InMemoryStore {
         Ok(PutResponse { version })
     }
 
-    async fn copy(&self, request: CopyRequest) -> Result<CopyResponse, kanso_client::Error> {
+    async fn patch(&self, request: PatchRequest) -> Result<PatchResponse, kanso_client::Error> {
         let mut data = self.data.write().await;
 
         // Get the existing object and clone the value we need
@@ -113,7 +113,7 @@ impl ObjectStore for InMemoryStore {
         if let Some(condition) = &request.condition {
             match condition {
                 Condition::IfAbsent => {
-                    // This doesn't make sense for copy (object must exist), but handle it
+                    // This doesn't make sense for patch (object must exist), but handle it
                     return Err(kanso_client::Error::ConditionFailed {
                         condition: condition.clone(),
                     });
@@ -140,6 +140,17 @@ impl ObjectStore for InMemoryStore {
             },
         );
 
-        Ok(CopyResponse { version })
+        Ok(PatchResponse { version })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_compliance() {
+        let store: kanso_client::Client = Arc::new(InMemoryStore::new());
+        kanso_backends_test_suite::run_compliance_tests(&store, "").await;
     }
 }

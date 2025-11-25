@@ -286,16 +286,16 @@ pub struct PutResponse {
     pub version: Version,
 }
 
-/// Request for a copy operation (copy object to itself with updated metadata)
+/// Request for a patch operation (update object metadata without touching data)
 #[derive(Debug, Clone)]
-pub struct CopyRequest {
+pub struct PatchRequest {
     pub key: Path,
     pub metadata: Metadata,
     pub condition: Option<Condition>,
 }
 
-impl CopyRequest {
-    /// Create a new copy request
+impl PatchRequest {
+    /// Create a new patch request
     ///
     /// Returns a PathError if the key doesn't satisfy Path invariants
     pub fn new(key: impl AsRef<str>, metadata: Metadata) -> Result<Self, PathError> {
@@ -306,22 +306,22 @@ impl CopyRequest {
         })
     }
 
-    /// Set the condition to only copy if the current version matches
+    /// Set the condition to only patch if the current version matches
     pub fn if_version_matches(mut self, version: Version) -> Self {
         self.condition = Some(Condition::IfVersionMatches(version));
         self
     }
 
-    /// Execute the copy request against a client
-    pub async fn execute(self, client: &Client) -> Result<CopyResponse, Error> {
-        client.copy(self).await
+    /// Execute the patch request against a client
+    pub async fn execute(self, client: &Client) -> Result<PatchResponse, Error> {
+        client.patch(self).await
     }
 }
 
-/// Response from a copy operation
+/// Response from a patch operation
 #[derive(Debug, Clone)]
-pub struct CopyResponse {
-    /// The new version of the copied object
+pub struct PatchResponse {
+    /// The new version of the patched object
     pub version: Version,
 }
 
@@ -336,8 +336,8 @@ pub trait ObjectStore: Send + Sync {
     /// Execute a put operation
     async fn put(&self, request: PutRequest) -> Result<PutResponse, Error>;
 
-    /// Execute a copy operation (copy object to itself with updated metadata)
-    async fn copy(&self, request: CopyRequest) -> Result<CopyResponse, Error>;
+    /// Execute a patch operation (update object metadata without touching data)
+    async fn patch(&self, request: PatchRequest) -> Result<PatchResponse, Error>;
 }
 
 /// Type alias for the object store client

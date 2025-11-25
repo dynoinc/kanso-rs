@@ -8,3 +8,7 @@ kanso-client = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+kanso-backends-test-suite = { workspace = true }
+tokio = { workspace = true }
