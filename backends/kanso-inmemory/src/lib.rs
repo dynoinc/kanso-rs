@@ -64,7 +64,9 @@ impl ObjectStore for InMemoryStore {
             match condition {
                 Condition::IfAbsent => {
                     if data.contains_key(&request.key) {
-                        return Err(kanso_client::Error::ConditionFailed);
+                        return Err(kanso_client::Error::ConditionFailed {
+                            condition: condition.clone(),
+                        });
                     }
                 }
                 Condition::IfVersionMatches(expected_version) => {
@@ -74,7 +76,9 @@ impl ObjectStore for InMemoryStore {
                         }
                         _ => {
                             // Version mismatch or key doesn't exist
-                            return Err(kanso_client::Error::ConditionFailed);
+                            return Err(kanso_client::Error::ConditionFailed {
+                                condition: condition.clone(),
+                            });
                         }
                     }
                 }
@@ -109,13 +113,17 @@ impl ObjectStore for InMemoryStore {
         if let Some(condition) = &request.condition {
             match condition {
                 Condition::IfAbsent => {
-                    // This doesn't make sense for copy, but handle it
-                    return Err(kanso_client::Error::ConditionFailed);
+                    // This doesn't make sense for copy (object must exist), but handle it
+                    return Err(kanso_client::Error::ConditionFailed {
+                        condition: condition.clone(),
+                    });
                 }
                 Condition::IfVersionMatches(expected_version) => {
                     let obj = data.get(&request.key).unwrap(); // Safe: we just checked it exists
                     if &obj.version != expected_version {
-                        return Err(kanso_client::Error::ConditionFailed);
+                        return Err(kanso_client::Error::ConditionFailed {
+                            condition: condition.clone(),
+                        });
                     }
                 }
             }

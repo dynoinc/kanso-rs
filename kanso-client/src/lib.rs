@@ -8,8 +8,8 @@ use thiserror::Error;
 /// Error type for object store operations
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("condition failed")]
-    ConditionFailed,
+    #[error("condition failed: {condition:?}")]
+    ConditionFailed { condition: Condition },
 
     #[error("not found")]
     NotFound,
@@ -46,6 +46,12 @@ impl From<&str> for Version {
     }
 }
 
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Metadata associated with an object (e.g., user-defined headers)
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Metadata {
@@ -73,6 +79,26 @@ impl Metadata {
     /// Get a value by key
     pub fn get(&self, key: &str) -> Option<&String> {
         self.headers.get(key)
+    }
+
+    /// Check if a key exists
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.headers.contains_key(key)
+    }
+
+    /// Remove a key-value pair
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        self.headers.remove(key)
+    }
+
+    /// Check if metadata is empty
+    pub fn is_empty(&self) -> bool {
+        self.headers.is_empty()
+    }
+
+    /// Get the number of entries
+    pub fn len(&self) -> usize {
+        self.headers.len()
     }
 }
 

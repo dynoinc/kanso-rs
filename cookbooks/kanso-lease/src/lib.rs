@@ -13,11 +13,15 @@ const EXPIRY_HEADER: &str = "x-kanso-lease-expiry";
 /// Error type for lease operations
 #[derive(Debug, Error)]
 pub enum LeaseError {
-    #[error("lease is held by another owner")]
-    LeaseHeld,
+    #[error("lease is held by owner '{owner}' until {expiry}")]
+    LeaseHeld { owner: String, expiry: u64 },
 
-    #[error("conflict during update")]
-    Conflict,
+    #[error("conflict during update: expected version {expected:?}, operation failed")]
+    Conflict {
+        expected: Version,
+        #[source]
+        source: kanso_client::Error,
+    },
 
     #[error("path not found")]
     NotFound,
@@ -98,7 +102,10 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
 
                 // If lease is alive and we don't own it, fail
                 if is_lease_alive(expiry_time) && current_owner != self.owner {
-                    return Err(LeaseError::LeaseHeld);
+                    return Err(LeaseError::LeaseHeld {
+                        owner: current_owner,
+                        expiry: expiry_time,
+                    });
                 }
 
                 // Either lease is expired or we own it - renew using copy
@@ -108,11 +115,15 @@ impl<T: Serialize + DeserializeOwned> AcquireRequest<T> {
                 metadata.insert(OWNER_HEADER, &self.owner);
                 metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
+                let expected_version = resp.version.clone();
                 let response = CopyRequest::new(&self.path, metadata)
                     .if_version_matches(resp.version)
                     .execute(client)
                     .await
-                    .map_err(|_| LeaseError::Conflict)?;
+                    .map_err(|e| LeaseError::Conflict {
+                        expected: expected_version,
+                        source: e,
+                    })?;
 
                 (value, response.version)
             }
@@ -157,12 +168,16 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
         metadata.insert(OWNER_HEADER, &self.owner);
         metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
+        let expected = self.version.clone();
         let response = PutRequest::new(&self.path, Bytes::from(value_bytes))
-            .if_version_matches(self.version.clone())
+            .if_version_matches(expected.clone())
             .metadata(metadata)
             .execute(&self.client)
             .await
-            .map_err(|_| LeaseError::Conflict)?;
+            .map_err(|e| LeaseError::Conflict {
+                expected,
+                source: e,
+            })?;
 
         self.version = response.version;
         Ok(())
@@ -180,11 +195,15 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
         metadata.insert(OWNER_HEADER, &self.owner);
         metadata.insert(EXPIRY_HEADER, expiry.to_string());
 
+        let expected = self.version.clone();
         let response = CopyRequest::new(&self.path, metadata)
-            .if_version_matches(self.version.clone())
+            .if_version_matches(expected.clone())
             .execute(&self.client)
             .await
-            .map_err(|_| LeaseError::Conflict)?;
+            .map_err(|e| LeaseError::Conflict {
+                expected,
+                source: e,
+            })?;
 
         self.version = response.version;
         Ok(())
@@ -195,23 +214,20 @@ impl<T: Serialize + DeserializeOwned> Lease<T> {
     /// This sets the expiry to a past time and clears the owner,
     /// making the lease available for others to acquire.
     pub async fn release(self) -> Result<(), LeaseError> {
-        // Get current value
-        let resp = GetRequest::new(&self.path)
-            .execute(&self.client)
-            .await?
-            .ok_or(LeaseError::NotFound)?;
-
-        // Set expiry to past and clear owner
+        // Set expiry to past and clear owner using copy (no need to fetch value)
         let mut metadata = Metadata::new();
         metadata.insert(OWNER_HEADER, "");
         metadata.insert(EXPIRY_HEADER, "0");
 
-        PutRequest::new(&self.path, resp.value)
-            .if_version_matches(resp.version)
-            .metadata(metadata)
+        let expected = self.version.clone();
+        CopyRequest::new(&self.path, metadata)
+            .if_version_matches(self.version)
             .execute(&self.client)
             .await
-            .map_err(|_| LeaseError::Conflict)?;
+            .map_err(|e| LeaseError::Conflict {
+                expected,
+                source: e,
+            })?;
 
         Ok(())
     }
@@ -281,7 +297,10 @@ mod tests {
             .owner("different-owner")
             .execute(&store)
             .await;
-        assert!(matches!(result, Err(LeaseError::LeaseHeld)));
+        assert!(matches!(
+            result,
+            Err(LeaseError::LeaseHeld { .. })
+        ));
 
         // Test that we CAN re-acquire if we own the lease
         let (_lease2, value2) = AcquireRequest::new("test-key", TestData { count: 888 })
