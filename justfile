@@ -9,7 +9,7 @@ lint: fmt
 
 # Run tests (depends on lint passing)
 test: lint
-    cargo nextest run
+    cargo test
 
 # Build release binary
 build:
